@@ -1,4 +1,4 @@
-{react} = flow = require 'lazy-flow'
+{react} = flow = require('lazy-flow')
 
 module.exports = flow
 
