@@ -1,165 +1,272 @@
 {react} = flow = require('lazy-flow')
+{isArray} = require('dc-util')
 
 module.exports = flow
 
 slice = Array.prototype.slice
 
-flow.watchEachList = (listItems, component) ->
-  watchingComponents = listItems.watchingComponents  or listItems.watchingComponents = {}
-  watchingComponents[component.dcid] = component
+flow.watchList = watchList = (listItems, listComponent) ->
 
-  if listItems.$dcWatching then return
+  watchingListComponents = listItems.watchingListComponents  or listItems.watchingListComponents = {}
+  watchingListComponents[listComponent.dcid] = listComponent
 
-  listItems.$dcWatching = true
-
-  shift = listItems.shift
-  pop = listItems.pop
-  push = listItems.push
-  reverse = listItems.reverse
-  sort = listItems.sort
-  splice = listItems.splice
-  unshift  = listItems.unshift
-
-  listItems.setItem = (startIndex, values...) ->
-    startIndex = startIndex>>>0
-    if startIndex<0 then throw new Error('array index is negative')
-
-    listLength = listItems.length
-    i = startIndex; j = 0; valuesLength = values.length
-    while j<valuesLength then listItems[i] = values[j]; i++; j++
-
-    if startIndex<listLength
-      for dcid, component of watchingComponents
-        component.invalidateChildren(startIndex, i)
-    else
-      for dcid, component of watchingComponents
-        component.invalidateChildren(listLength, i)
+  if listItems.eachWatching
     return
 
-  listItems.pop = ->
-    listLength = listItems.length
-    if !listLength then return
-    result = pop.call(this)
-    for dcid, component of watchingComponents
-      component.invalidateChildren(listLength-1, listLength)
+  listItems.eachWatching = true
+
+  listItems._shift = listItems.shift
+  listItems._pop = listItems.pop
+  listItems._push = listItems.push
+  listItems._reverse = listItems.reverse
+  listItems._sort = listItems.sort
+  listItems._splice = listItems.splice
+  listItems._unshift  = listItems.unshift
+
+  listItems.shift = ListWatchMixin.shift
+  listItems.pop = ListWatchMixin.pop
+  listItems.push = ListWatchMixin.push
+  listItems.reverse = ListWatchMixin.reverse
+  listItems.sort = ListWatchMixin.sort
+  listItems.splice = ListWatchMixin.splice
+  listItems.unshift  = ListWatchMixin.unshift
+  listItems.setItem  = ListWatchMixin.setItem
+  listItems.setLength  = ListWatchMixin.setLength
+  listItems.updateComponents  = ListWatchMixin.updateComponents
+  listItems.updateComponent  = ListWatchMixin.updateComponent
+  listItems.getListChildren  = ListWatchMixin.getListChildren
+
+ListWatchMixin = {}
+
+ListWatchMixin.getListChildren = (listComponent, start, stop) ->
+  children = []
+  i = start
+  while i < stop
+    itemComponent = listComponent.getItemComponent(this[i], start+i)
+    # ensure it can be invalidate again while setItem
+    itemComponent.valid = true
+    children.push(itemComponent)
+    i++
+  children
+
+ListWatchMixin.updateComponent = (listComponent, start, stop) ->
+  children = this.getListChildren(listComponent, start, stop)
+  listComponent.setChildren(start, children)
+  this
+
+ListWatchMixin.updateComponents = (start, stop) ->
+  watchingListComponents = this.watchingListComponents
+  for _, listComponent of watchingListComponents
+    this.updateComponent(listComponent, start, stop)
+  this
+
+ListWatchMixin.setItem = (start, values...) ->
+  start = start >>> 0
+  if start<0
+    start = 0
+
+  for value, i in values
+    this[start+i] = values[i]
+
+  this.updateComponents(start, start+values.length)
+  this
+
+ListWatchMixin.pop = ->
+  if !this.length
+    return
+  else
+    watchingListComponents = this.watchingListComponents
+    result = this._pop()
+    for _, listComponent of watchingListComponents
+      listComponent.popChild()
     result
 
-  listItems.push = ->
-    oldLength = listItems.length
-    result = push.apply(listItems, arguments)
-    listLength = listItems.length
-    for dcid, component of watchingComponents
-      component.invalidateChildren(oldLength, listLength)
-    result
+ListWatchMixin.push = (args...)->
+  watchingListComponents = this.watchingListComponents
+  length = this.length
+  result = this._push.apply(this, arguments)
+  for _, listComponent of watchingListComponents
+    child = listComponent.getItemComponent(this[length], length)
+    listComponent.pushChild(child)
+  result
 
-  listItems.shift = ->
-    if !listItems.length then return
-    result = shift.call(this)
-    listLength = listItems.length
-    for dcid, component of watchingComponents
-      component.invalidateChildren(0, listLength)
-    result
-
-  listItems.unshift= ->
-    result = unshift.apply(listItems, arguments)
-    listLength = listItems.length
-    for dcid, component of watchingComponents
-      component.invalidateChildren(0, listLength)
-    result
-
-  listItems.reverse= ->
-    listLength = listItems.length
-    if listLength <= 1 then return listItems
-    reverse.call(listItems)
-    for dcid, component of watchingComponents
-      component.invalidateChildren(0, listLength)
-    listItems
-
-  listItems.sort= ->
-    listLength = listItems.length
-    if listLength <= 1 then return listItems
-    sort.call(listItems)
-    for dcid, component of watchingComponents
-      component.invalidateChildren(0, listLength)
-    listItems
-
-  listItems.splice = (start, deleteCount) ->
-    len = arguments.length
-    oldListLength = listItems.length
-    start  = start>>>0
-    if start<0 then start = 0
-    if start>oldListLength then start = oldListLength
-    inserted = slice.call(arguments, 2)
-    result = splice.apply(this, [start, deleteCount].concat(inserted))
-    listLength = listItems.length
-    for dcid, component of watchingComponents
-      if oldListLength==listLength
-        component.invalidateChildren(start, start+deleteCount)
+ListWatchMixin.shift = (args...) ->
+  if !this.length
+    this
+  else
+    watchingListComponents = this.watchingListComponents
+    this._shift()
+    length = this.length
+    for _, listComponent of watchingListComponents
+      if !listComponent.updateSuccChild
+        listComponent.shiftChild()
       else
-        component.invalidateChildren(start, Math.max(oldListLength, listLength) )
+        this.updateComponent(listComponent, length)
+    this
+
+ListWatchMixin.unshift = (child) ->
+  this._unshift(child)
+  watchingListComponents = this.watchingListComponents
+  for _, listComponent of watchingListComponents
+    if !listComponent.updateSuccChild
+      child = listComponent.getItemComponent(this[0], 0)
+      listComponent.unshiftChild(child)
+    else
+      this.updateComponent(listComponent, this.length)
+
+ListWatchMixin.reverse = ->
+  listLength = this.length
+  if listLength <= 1
+    this
+  else
+    this._reverse()
+    this.updateComponents(0, listLength)
+
+ListWatchMixin.sort = ->
+  listLength = this.length
+  if listLength <= 1
+    this
+  else
+    this._sort()
+    this.updateComponents(0, listLength)
+
+ListWatchMixin.splice = (start, deleteCount) ->
+  inserted = slice.call(arguments, 2)
+  insertedLength = inserted.length
+
+  if deleteCount == 0 && insertedLength == 0
+    this
+  else
+    oldListLength = this.length
+    start  = start >>> 0
+    if start < 0
+      start = 0
+    else if start > oldListLength
+      start = oldListLength
+    result = this._splice.apply(this, [start, deleteCount].concat(inserted))
+    newLength = result.length
+    if newLength == oldListLength
+      this.updateComponents(start, start+insertedLength)
+    else
+      for _, listComponent of watchingListComponents
+        if !listComponent.updateSuccChild
+          if insertedLength > deleteCount
+            i = start
+            while i < deleteCount
+              child = listComponent.getItemComponent(this[i], i)
+              listComponent.replaceChild(i, child)
+              i++
+            while i < insertedLength
+              child = listComponent.getItemComponent(this[i], i)
+              listComponent.insertChild(i, child)
+              i++
+          else
+            i = start
+            while i < insertedLength
+              child = listComponent.getItemComponent(this[i], i)
+              listComponent.replaceChild(i, child)
+              i++
+            while i < deleteCount
+              listComponent.removeChild(start+insertedLength)
+              i++
+        else
+          this.updateComponent(listComponent, start, newLength)
     result
 
-  listItems.setLength = (length) ->
-    oldListLength = listItems.length
-    if length==oldListLength  then return
+ListWatchMixin.setLength = (length) ->
+  oldListLength = this.length
+  if length == oldListLength
+    this
+  else if length <= oldListLength
+    watchingListComponents = this.watchingListComponents
+    this.length = length
+    for _, listComponent of watchingListComponents
+      listComponent.setLength(length)
+    this
+  else
+    this.updateComponents(oldListLength, length)
+    this
 
-    listItems.length = length
-    for dcid, component of watchingComponents
-      if length>oldListLength
-        component.invalidateChildren(oldListLength, length)
-      else component._setLength(length)
+flow.watchObject = watchObject = (objectItems, listComponent, itemFn) ->
 
+  watchingListComponents = objectItems.watchingListComponents or objectItems.watchingListComponents = {}
+  watchingListComponents[listComponent.dcid] = listComponent
+
+  if objectItems.eachWatching
     return
 
-flow.watchEachObject = (objectItems, component) ->
+  objectItems.eachWatching = true
 
-  watchingComponents = objectItems.watchingComponents or objectItems.watchingComponents = {}
-  watchingComponents[component.dcid] = component
+  objectItems.deleteItem = ObjectWatchMixin.deleteItem
+  objectItems.setItem = ObjectWatchMixin.setItem
+  objectItems.extendItems = ObjectWatchMixin.extendItems
 
-  if objectItems.$dcWatching then return
+ObjectWatchMixin = {}
 
-  objectItems.$dcWatching = true
+ObjectWatchMixin.deleteItem = (keys...) ->
+  watchingListComponents = this.watchingListComponents
+  if !watchingListComponents.length
+    return this
+  for key in keys
+    if this.hasOwnProperty(key)
+      if key[..2] == '$dc'  # $dcSetItem, $dcDeleteItem, $dcExtendItems, watchingListComponents
+        throw new Error('do not remove the key: ' + key + ', which is used by "each component" of dc')
+      delete this[key]
+      for _, listComponent of watchingListComponents
+        keyChildMap = listComponent.keyChildMap
+        index = keyChildMap[key]
+        children = listComponent.children
+        length = children.length
+        break
+      for _, listComponent of watchingListComponents
+        if !listComponent.updateSuccChild
+          listComponent.removeChild(index)
+        else
+          i = index + 1
+          children = listComponent.children
+          while i < length
+            oldChild = children[i]
+            newChild = listComponent.getItemComponent(oldChild.$watchingKey, i, this, listComponent)
+            listComponent.replaceChild(oldChild, newChild)
+            i++
+          listComponent.removeChild(index)
+        delete keyChildMap[key]
+  this
 
-  objectItems.deleteItem = (keys...) ->
-    items = component._items
-    oldItemsLength = items.length
-    for key in keys
-      if !objectItems.hasOwnProperty(key) then continue
-      delete objectItems[key]
+ObjectWatchMixin.setItem = (key, value) ->
+  if isEachObjectSystemKey(key)  # $dcSetItem, $dcDeleteItem, $dcExtendItems, watchingListComponents
+    throw new Error('do not use the key: ' + key + ', which is used by "each component" of dc')
+  watchingListComponents = this.watchingListComponents
+  if this.hasOwnProperty(key)
+    this[key] = value
+    for _, listComponent of watchingListComponents
+      oldChildIndex = listComponent.keyChildMap[key]
+      newChild = listComponent.getItemComponent(key, oldChildIndex, this, listComponent)
+      listComponent.replaceChild(oldChild, newChild)
+  else
+    length = listComponent.children.length
+    for _, listComponent of watchingListComponents
+      newChild = listComponent.getItemComponent(key, length, this, listComponent)
+      listComponent.pushChild(newChild)
+  this
 
-      for dcid, component of watchingComponents
-        min = oldItemsLength
-        for [key1, _], index in component.items
-          if `key1==key`
-            items.splice(index, 1)
-            if index<min then min = index
-            component.invalidateChildren(min, oldItemsLength)
-            break
+ObjectWatchMixin.extendItems = (obj) ->
+  for key, value of obj
+    this.setItem(key, value)
+  this
 
-      oldItemsLength--
+flow.isEachObjectSystemKey = isEachObjectSystemKey = (key) ->
+  /setItem|deleteItem|extendItems|watchingListComponents|eachWatching/.test(key)
+  
+flow.watchItems = (items, listComponent) ->
+  if !items
+    throw new Error('items to be watched should be an array or object.')
+  if isArray(items)
+    watchList(items, listComponent)
+  else
+    watchObject(items, listComponent)
 
-  objectItems.setItem = (key, value) ->
+  listComponent
 
-    items = component._items
 
-    if objectItems.hasOwnProperty(key)
-      if objectItems[key]!=value
-        for dcid, component of watchingComponents
-          for [key1, _], index in items
-            if `key1==key`
-              component.invalidateChildren(index, index+1)
-              break
-
-    else
-      length = _items.length
-      for dcid, component of watchingComponents
-        _items.push([key, value])
-        component.invalidateChildren(length, length+1)
-
-  objectItems.extend = (obj) ->
-    for key, value of obj
-      objectItems.setItem(key, value)
-
-# make itemFn always invalidate childComponent of the Each component
-# be careful about this, this will affect the performace
-flow.pour = (itemFn) -> itemFn.pouring = true; itemFn
+   
