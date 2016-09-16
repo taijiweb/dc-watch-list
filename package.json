@@ -1,6 +1,6 @@
 {
   "name": "dc-watch-list",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "watch generated list from array or object for Each component in domcom",
   "keywords": [
     "domcom",
