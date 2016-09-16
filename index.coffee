@@ -1,5 +1,6 @@
 {react} = flow = require('lazy-flow')
 {isArray} = require('dc-util')
+extend = require('extend')
 
 module.exports = flow
 
@@ -7,7 +8,7 @@ slice = Array.prototype.slice
 
 flow.watchList = watchList = (listItems, listComponent) ->
 
-  watchingListComponents = listItems.watchingListComponents  or listItems.watchingListComponents = {}
+  watchingListComponents = listItems.watchingListComponents  || listItems.watchingListComponents = {}
   watchingListComponents[listComponent.dcid] = listComponent
 
   if listItems.eachWatching
@@ -35,6 +36,7 @@ flow.watchList = watchList = (listItems, listComponent) ->
   listItems.updateComponents  = ListWatchMixin.updateComponents
   listItems.updateComponent  = ListWatchMixin.updateComponent
   listItems.getListChildren  = ListWatchMixin.getListChildren
+  listItems.replaceAll = ListWatchMixin.replaceAll
 
 ListWatchMixin = {}
 
@@ -42,7 +44,7 @@ ListWatchMixin.getListChildren = (listComponent, start, stop) ->
   children = []
   i = start
   while i < stop
-    itemComponent = listComponent.getItemComponent(this[i], start+i)
+    itemComponent = listComponent.getItemComponent(this[i], i)
     # ensure it can be invalidate again while setItem
     itemComponent.valid = true
     children.push(itemComponent)
@@ -90,7 +92,7 @@ ListWatchMixin.push = (args...)->
     listComponent.pushChild(child)
   result
 
-ListWatchMixin.shift = (args...) ->
+ListWatchMixin.unshift = (args...) ->
   if !this.length
     this
   else
@@ -144,34 +146,40 @@ ListWatchMixin.splice = (start, deleteCount) ->
     else if start > oldListLength
       start = oldListLength
     result = this._splice.apply(this, [start, deleteCount].concat(inserted))
-    newLength = result.length
+    newLength = this.length
     if newLength == oldListLength
       this.updateComponents(start, start+insertedLength)
     else
+      watchingListComponents = this.watchingListComponents
       for _, listComponent of watchingListComponents
         if !listComponent.updateSuccChild
           if insertedLength > deleteCount
             i = start
-            while i < deleteCount
+            j = 0
+            while j < deleteCount
               child = listComponent.getItemComponent(this[i], i)
               listComponent.replaceChild(i, child)
               i++
-            while i < insertedLength
+              j++
+            while j < insertedLength
               child = listComponent.getItemComponent(this[i], i)
               listComponent.insertChild(i, child)
               i++
+              j++
           else
             i = start
-            while i < insertedLength
+            j = 0
+            while j < insertedLength
               child = listComponent.getItemComponent(this[i], i)
               listComponent.replaceChild(i, child)
               i++
-            while i < deleteCount
-              listComponent.removeChild(start+insertedLength)
-              i++
+              j++
+            while j < deleteCount
+              listComponent.removeChild(i)
+              j++
         else
           this.updateComponent(listComponent, start, newLength)
-    result
+    this
 
 ListWatchMixin.setLength = (length) ->
   oldListLength = this.length
@@ -187,9 +195,14 @@ ListWatchMixin.setLength = (length) ->
     this.updateComponents(oldListLength, length)
     this
 
+ListWatchMixin.replaceAll = (newItems) ->
+  this.setItem(0, newItems...)
+  this.setLength(newItems.length)
+  this
+
 flow.watchObject = watchObject = (objectItems, listComponent, itemFn) ->
 
-  watchingListComponents = objectItems.watchingListComponents or objectItems.watchingListComponents = {}
+  watchingListComponents = objectItems.watchingListComponents || objectItems.watchingListComponents = {}
   watchingListComponents[listComponent.dcid] = listComponent
 
   if objectItems.eachWatching
@@ -197,9 +210,7 @@ flow.watchObject = watchObject = (objectItems, listComponent, itemFn) ->
 
   objectItems.eachWatching = true
 
-  objectItems.deleteItem = ObjectWatchMixin.deleteItem
-  objectItems.setItem = ObjectWatchMixin.setItem
-  objectItems.extendItems = ObjectWatchMixin.extendItems
+  extend(objectItems, ObjectWatchMixin)
 
 ObjectWatchMixin = {}
 
@@ -253,6 +264,14 @@ ObjectWatchMixin.setItem = (key, value) ->
 ObjectWatchMixin.extendItems = (obj) ->
   for key, value of obj
     this.setItem(key, value)
+  this
+
+ObjectWatchMixin.replaceAll = (obj) ->
+  keys = Object.keys(this)
+  for key in keys
+    if !obj.hasOwnProperty(key)
+      this.deleteItem(key)
+  this.extendItems(obj)
   this
 
 flow.isEachObjectSystemKey = isEachObjectSystemKey = (key) ->

@@ -1,9 +1,11 @@
-var ListWatchMixin, ObjectWatchMixin, flow, isArray, isEachObjectSystemKey, react, slice, watchList, watchObject,
+var ListWatchMixin, ObjectWatchMixin, extend, flow, isArray, isEachObjectSystemKey, react, slice, watchList, watchObject,
   __slice = [].slice;
 
 react = (flow = require('lazy-flow')).react;
 
 isArray = require('dc-util').isArray;
+
+extend = require('extend');
 
 module.exports = flow;
 
@@ -35,7 +37,8 @@ flow.watchList = watchList = function(listItems, listComponent) {
   listItems.setLength = ListWatchMixin.setLength;
   listItems.updateComponents = ListWatchMixin.updateComponents;
   listItems.updateComponent = ListWatchMixin.updateComponent;
-  return listItems.getListChildren = ListWatchMixin.getListChildren;
+  listItems.getListChildren = ListWatchMixin.getListChildren;
+  return listItems.replaceAll = ListWatchMixin.replaceAll;
 };
 
 ListWatchMixin = {};
@@ -45,7 +48,7 @@ ListWatchMixin.getListChildren = function(listComponent, start, stop) {
   children = [];
   i = start;
   while (i < stop) {
-    itemComponent = listComponent.getItemComponent(this[i], start + i);
+    itemComponent = listComponent.getItemComponent(this[i], i);
     itemComponent.valid = true;
     children.push(itemComponent);
     i++;
@@ -114,7 +117,7 @@ ListWatchMixin.push = function() {
   return result;
 };
 
-ListWatchMixin.shift = function() {
+ListWatchMixin.unshift = function() {
   var args, length, listComponent, watchingListComponents, _;
   args = 1 <= arguments.length ? __slice.call(arguments, 0) : [];
   if (!this.length) {
@@ -175,7 +178,7 @@ ListWatchMixin.sort = function() {
 };
 
 ListWatchMixin.splice = function(start, deleteCount) {
-  var child, i, inserted, insertedLength, listComponent, newLength, oldListLength, result, _;
+  var child, i, inserted, insertedLength, j, listComponent, newLength, oldListLength, result, watchingListComponents, _;
   inserted = slice.call(arguments, 2);
   insertedLength = inserted.length;
   if (deleteCount === 0 && insertedLength === 0) {
@@ -189,35 +192,41 @@ ListWatchMixin.splice = function(start, deleteCount) {
       start = oldListLength;
     }
     result = this._splice.apply(this, [start, deleteCount].concat(inserted));
-    newLength = result.length;
+    newLength = this.length;
     if (newLength === oldListLength) {
       this.updateComponents(start, start + insertedLength);
     } else {
+      watchingListComponents = this.watchingListComponents;
       for (_ in watchingListComponents) {
         listComponent = watchingListComponents[_];
         if (!listComponent.updateSuccChild) {
           if (insertedLength > deleteCount) {
             i = start;
-            while (i < deleteCount) {
+            j = 0;
+            while (j < deleteCount) {
               child = listComponent.getItemComponent(this[i], i);
               listComponent.replaceChild(i, child);
               i++;
+              j++;
             }
-            while (i < insertedLength) {
+            while (j < insertedLength) {
               child = listComponent.getItemComponent(this[i], i);
               listComponent.insertChild(i, child);
               i++;
+              j++;
             }
           } else {
             i = start;
-            while (i < insertedLength) {
+            j = 0;
+            while (j < insertedLength) {
               child = listComponent.getItemComponent(this[i], i);
               listComponent.replaceChild(i, child);
               i++;
+              j++;
             }
-            while (i < deleteCount) {
-              listComponent.removeChild(start + insertedLength);
-              i++;
+            while (j < deleteCount) {
+              listComponent.removeChild(i);
+              j++;
             }
           }
         } else {
@@ -225,7 +234,7 @@ ListWatchMixin.splice = function(start, deleteCount) {
         }
       }
     }
-    return result;
+    return this;
   }
 };
 
@@ -248,6 +257,12 @@ ListWatchMixin.setLength = function(length) {
   }
 };
 
+ListWatchMixin.replaceAll = function(newItems) {
+  this.setItem.apply(this, [0].concat(__slice.call(newItems)));
+  this.setLength(newItems.length);
+  return this;
+};
+
 flow.watchObject = watchObject = function(objectItems, listComponent, itemFn) {
   var watchingListComponents;
   watchingListComponents = objectItems.watchingListComponents || (objectItems.watchingListComponents = {});
@@ -256,9 +271,7 @@ flow.watchObject = watchObject = function(objectItems, listComponent, itemFn) {
     return;
   }
   objectItems.eachWatching = true;
-  objectItems.deleteItem = ObjectWatchMixin.deleteItem;
-  objectItems.setItem = ObjectWatchMixin.setItem;
-  return objectItems.extendItems = ObjectWatchMixin.extendItems;
+  return extend(objectItems, ObjectWatchMixin);
 };
 
 ObjectWatchMixin = {};
@@ -338,6 +351,19 @@ ObjectWatchMixin.extendItems = function(obj) {
     value = obj[key];
     this.setItem(key, value);
   }
+  return this;
+};
+
+ObjectWatchMixin.replaceAll = function(obj) {
+  var key, keys, _i, _len;
+  keys = Object.keys(this);
+  for (_i = 0, _len = keys.length; _i < _len; _i++) {
+    key = keys[_i];
+    if (!obj.hasOwnProperty(key)) {
+      this.deleteItem(key);
+    }
+  }
+  this.extendItems(obj);
   return this;
 };
 
